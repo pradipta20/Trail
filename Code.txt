@@ -1,0 +1,144 @@
+//import packages
+
+import org.apache.spark._
+import org.apache.spark.rdd.RDD
+import org.apache.spark.util.IntParam
+import org.apache.spark.sql.SQLContext
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.types._
+import org.apache.spark.sql._
+import org.apache.spark.mllib.stat.Statistics
+import org.apache.spark.sql.SparkSession
+
+//initialize sparksession
+
+val spark =SparkSession.builder().appName("Spark SQL Basic Example").config("spark.some.config.option", "some-value").getOrCreate()
+import spark.implicits._
+import spark._
+//val sqlContext = new org.apache.spark.sql.SQLContext(sc)
+val sqlContext = spark.sqlContext
+import sqlContext.implicits._
+import sqlContext._
+
+//Stock Class
+
+case class Stock(dt: String, openprice: Double, highprice: Double, lowprice: Double, closeprice: Double, volume: Double, adjcloseprice: Double)
+def parseStock(str: String): Stock = {
+val line =str.split(",")
+Stock(line(0), line(1).toDouble, line(2).toDouble, line(3).toDouble, line(4).toDouble, line(5).toDouble, line(6).toDouble)
+}
+
+def parseRDD(rdd: RDD[String]): RDD[Stock] = {
+val header = rdd.first
+rdd.filter(_(0) != header(0)).map(parseStock).cache()
+}
+
+//Company 1 AAON
+val stocksAAONDF2 =parseRDD(sc.textFile("C:/Spark/AAON.csv")).toDF.cache()
+stocksAAONDF2.show()
+stocksAAONDF2.printSchema()
+
+//Company 2 ABAX
+val stocksABAXDF2 =parseRDD(sc.textFile("C:/Spark/ABAX.csv")).toDF.cache()
+stocksABAXDF2.show()
+stocksABAXDF2.printSchema()
+
+//Company 3 FAST
+val stocksFASTDF2 =parseRDD(sc.textFile("C:/Spark/FAST.csv")).toDF.cache()
+stocksFASTDF2.show()
+stocksFASTDF2.printSchema()
+--------------------------------------
+//Company 4 FFIV
+val stocksFFIVDF2 =parseRDD(sc.textFile("")).toDF.cache()
+stocksFFIVDF2.show()
+stocksFFIVDF2.printSchema()
+
+//Company 5 GILD
+val stocksGILDDF2 =parseRDD(sc.textFile("")).toDF.cache()
+stocksGILDDF2.show()
+stocksGILDDF2.printSchema()
+-------------------------------------
+//Company 6 MSFT
+val stocksMSFTDF2 =parseRDD(sc.textFile("C:/Spark/MSFT.csv")).toDF.cache()
+stocksMSFTDF2.show()
+stocksMSFTDF2.printSchema()
+-----------------------------------
+//Company 7 ORLY
+val stocksORLYDF2 =parseRDD(sc.textFile("")).toDF.cache()
+stocksORLYDF2.show()
+stocksORLYDF2.printSchema()
+
+//Company 8 PCAR
+val stocksPCARDF2 =parseRDD(sc.textFile("")).toDF.cache()
+stocksPCARDF2.show()
+stocksPCARDF2.printSchema()
+
+//Company 9 SHLM
+val stocksSHLMDF2 =parseRDD(sc.textFile("")).toDF.cache()
+stocksSHLMDF2.show()
+stocksSHLMDF2.printSchema()
+
+//Company 10 WYNN
+val stocksWYNNDF2 =parseRDD(sc.textFile("")).toDF.cache()
+stocksWYNNDF2.show()
+stocksWYNNDF2.printSchema()
+------------------------------------
+
+//Register the DataFrames as Temp Views
+
+stocksAAONDF2.registerTempTable("stocksAAON")
+stocksAAONDF2.createOrReplaceTempView("stocksAAON")
+stocksABAXDF2.registerTempTable("stocksABAX")
+stocksFASTDF2.registerTempTable("stocksFAST")
+stocksFFIVDF2.registerTempTable("stocksFFIV")
+stocksGILDDF2.registerTempTable("stocksGILD")
+stocksMSFTDF2.registerTempTable("stocksMSFT")
+stocksORLYDF2.registerTempTable("stocksORLY")
+stocksPCARDF2.registerTempTable("stocksPCAR")
+stocksSHLMDF2.registerTempTable("stocksSHLM")
+stocksWYNNDF2.registerTempTable("stocksWYNN")
+
+//Query 1 - Display the Average of Adjacent Closing Price for AAON for every month
+stocksAAONDF2.select(year($"dt").alias("yr"),month($"dt").alias("mo"), $"adjcloseprice").groupBy("yr","mo").agg(avg("adjcloseprice")).orderBy(desc("yr"),desc("mo")).show
+
+//Query 2  - List when the closing price for MSFT went up or down by more than 2 dollars
+var res2 = sqlContext.sql("SELECT stocksMSFT.dt, stocksMSFT.openprice, stocksMSFT.closeprice, abs(stocksMSFT.closeprice - stocksMSFT.openprice) as MSFTDiff FROM stocksMSFT WHERE abs(stocksMSFT.closeprice - stocksMSFT.openprice) >2 ")
+res2.show
+
+//Query 3 - Join all stock closing prices in order to compare AAON ABAX FAST
+val joinclose2 =sqlContext.sql("SELECT stocksAAON.dt, stocksAAON.adjcloseprice as AAONClose, stocksABAX.adjcloseprice as ABAXClose, stocksFAST.adjcloseprice as FASTClose from stocksAAON join stocksABAX on stocksAAON.dt = stocksABAX.dt join stocksFAST on stocksAAON.dt = stocksFAST.dt").cache
+joinclose2.show
+joinclose2.registerTempTable("joinclose2")
+
+//Query 4 - Save joined view in a parquet table
+joinclose2.write.format("parquet").save("/Filepath/.joinstock.parquet")
+
+//Query 5 - Read parquet table into a dataframe
+val df =sqlContext.read.parquet("/Filepath/.joinstock.parquet")
+df.show
+
+//Query 6 - Creating newTable
+val newTable1=sqlContext.sql("SELECT year(joinclose2.dt) as year, avg(joinclose2.AAONClose) as AAON, avg(joinclose2.ABAXClose) as ABAX, avg(joinclose2.FASTClose) as FAST from joinclose2 group By year(joinclose2.dt) order by year(joinclose2.dt)").cache
+newTable1.show
+newTable1.registerTempTable("newTable1")
+
+//Query 7 - Transformation of 'newTables' with Year and corresponding 3 companies data into CompanyAll table
+val BestCompanyYear1 = sqlContext.sql("SELECT year, GREATEST((AAON), (ABAX), (FAST)) as BestCompany FROM newTable1").cache
+BestCompanyYear1.show
+BestCompanyYear1.registerTempTable("BestCompanyYear")
+
+//Query 8 - Create 'BestCompany' the Best Average Closing Prices of AAON, ABAX and FAST per year
+val CompanyAll1 = sqlContext.sql("select year, AAON Value, 'AAON' Company from newTable1 union all select year, ABAX Value, 'ABAX' Company from newTable1 union all select year, FAST Value, 'FAST' Company from newTable1").cache
+CompanyAll1.show
+CompanyAll1.registerTempTable("CompanyAll")
+
+//Query 9 - We find the company with the best Closing Price Average per year
+val FinalTable = sqlContext.sql("SELECT CompanyAll.year, BestCompanyYear.BestCompany, CompanyAll.Company FROM BestCompanyYear LEFT JOIN CompanyAll ON
+CompanyAll.Value=BestCompanyYear.BestCompany ORDER BY CompanyAll.year").cache
+FinalTable.show
+FinalTable.register.TempTable("FinalTable")
+
+//Query 10 - Calculate the correlation between the two series of data
+val series1 = df.select($"AAONClose").map{row:Row => row.getAs[Double]("AAONClose")}.rdd
+val series2 = df.select($"ABAXClose").map{row:Row => row.getAs[Double]("ABAXClose")}.rdd
+val correlation = Statistics.corr(series1, series2, "pearson")
